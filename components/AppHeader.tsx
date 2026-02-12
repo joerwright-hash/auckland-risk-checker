@@ -7,7 +7,6 @@ import { motion } from "framer-motion";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { DarkModeToggle } from "@/components/ui/DarkModeToggle";
 import { LanguageToggle } from "@/components/ui/LanguageToggle";
-import { createSupabaseClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { 
   Leaf, 
@@ -75,53 +74,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       e.preventDefault();
       e.stopPropagation();
     }
-    
-    try {
-      // Close dropdown/menu immediately
-      setShowUserDropdown(false);
-      setShowMobileMenu(false);
-      
-      const supabase = createSupabaseClient();
-      
-      // Sign out with scope: 'local' to clear local session
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
-      
-      if (error) {
-        console.error('Error signing out:', error);
-        // Try to redirect anyway and clear local storage
-        if (typeof window !== 'undefined') {
-          localStorage.clear();
-          sessionStorage.clear();
-        }
-        router.push('/');
-        toast.error('Signed out locally. Please clear cookies if issues persist.');
-        return;
-      }
-      
-      // Clear local storage as well
-      if (typeof window !== 'undefined') {
-        localStorage.clear();
-        sessionStorage.clear();
-      }
-      
-      // Redirect to landing page
-      router.push('/');
-      router.refresh(); // Force refresh to clear any cached data
-      
-      toast.success('Successfully signed out');
-    } catch (error: any) {
-      console.error('Unexpected error during logout:', error);
-      
-      // Clear storage and redirect anyway
-      if (typeof window !== 'undefined') {
-        localStorage.clear();
-        sessionStorage.clear();
-      }
-      
-      router.push('/');
-      router.refresh();
-      toast.error('Signed out locally');
+
+    setShowUserDropdown(false);
+    setShowMobileMenu(false);
+
+    if (typeof window !== 'undefined') {
+      localStorage.clear();
+      sessionStorage.clear();
     }
+
+    router.push('/');
+    router.refresh();
+    toast.success('Signed out');
   };
 
   const userMenuItems = [

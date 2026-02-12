@@ -9,11 +9,6 @@ import { LogoPanel } from "@/components/scanner/LogoPanel";
 import { LogoResultsPanel } from "@/components/scanner/LogoResultsPanel";
 import { ScanResults, scanTextNew } from "@/lib/scanner-logic";
 import { LogoAnalysisResults } from "@/lib/logo-analysis";
-import { createSupabaseClient } from "@/lib/supabase/client";
-import { saveScan, getUserScans, type ScanRecord } from "@/lib/supabase/scans";
-import { getUserSubscription, type UserSubscription } from "@/lib/supabase/subscriptions";
-import { getScanLimit, isUnlimited } from "@/lib/subscription-limits";
-import { getCurrentUserInfo } from "@/lib/user-utils";
 import { toast } from "sonner";
 import { FileText, Shield } from "lucide-react";
 
@@ -24,113 +19,20 @@ export default function AppPage() {
   const [inputText, setInputText] = useState("");
   const [results, setResults] = useState<ScanResults | null>(null);
   const [logoResults, setLogoResults] = useState<LogoAnalysisResults | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [subscription, setSubscription] = useState<UserSubscription | null>(null);
   const [scansUsed, setScansUsed] = useState(0);
-  const [scansRemaining, setScansRemaining] = useState<number | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userInitials, setUserInitials] = useState<string | null>(null);
-
-  // Load cached user info after mount to avoid hydration mismatch
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const cached = sessionStorage.getItem("userInfo");
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed.timestamp && Date.now() - parsed.timestamp < 5 * 60 * 1000) {
-            setUserName(parsed.userName);
-            setUserInitials(parsed.userInitials);
-          }
-        }
-      } catch (error) {
-        // Ignore errors
-      }
-    }
-  }, []);
 
   const handleScanComplete = useCallback(async (scanResults: ScanResults) => {
     setResults(scanResults);
-
-    // Save scan to database if user is logged in
-    if (userId) {
-      try {
-        const { error } = await saveScan(userId, scanResults);
-        if (error) {
-          console.error("Error saving scan:", error);
-          const errorMessage = error.message || "Failed to save scan to history";
-          toast.error(errorMessage);
-        } else {
-          toast.success("Scan saved to history");
-
-          // Refresh usage data
-          const { data: subData } = await getUserSubscription(userId);
-          setSubscription(subData);
-
-          const plan = (subData?.plan || 'free') as 'free' | 'starter' | 'pro';
-          if (isUnlimited(plan)) {
-            setScansRemaining(null);
-          } else {
-            setScansRemaining(subData?.scans_remaining ?? 0);
-          }
-          setScansUsed(prev => prev + 1);
-        }
-      } catch (error: any) {
-        console.error("Unexpected error saving scan:", error);
-        const errorMessage = error?.message || "Failed to save scan to history";
-        toast.error(errorMessage);
-      }
-    }
-  }, [userId]);
+    setScansUsed(prev => prev + 1);
+  }, []);
 
   const handleLogoAnalysisComplete = useCallback((analysisResults: LogoAnalysisResults) => {
     setLogoResults(analysisResults);
   }, []);
 
-  // Get current user, subscription, and usage data
+  // Handle auto-scan from URL params (demo text)
   useEffect(() => {
-    const loadUserData = async () => {
-      const supabase = createSupabaseClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserId(user.id);
-
-        const userInfo = await getCurrentUserInfo();
-        setUserName(userInfo.userName);
-        setUserInitials(userInfo.userInitials);
-
-        const { data: subData } = await getUserSubscription(user.id);
-        setSubscription(subData);
-
-        const plan = (subData?.plan || 'free') as 'free' | 'starter' | 'pro';
-
-        const { data: scans } = await getUserScans(user.id);
-        const now = new Date();
-        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const monthlyScans = (scans || []).filter(
-          (scan: ScanRecord) => new Date(scan.created_at) >= thisMonthStart
-        );
-
-        setScansUsed(monthlyScans.length);
-
-        if (isUnlimited(plan)) {
-          setScansRemaining(null);
-        } else {
-          setScansRemaining(subData?.scans_remaining ?? 0);
-        }
-      }
-    };
-
-    loadUserData();
-
     const urlParams = new URLSearchParams(window.location.search);
-    const sessionId = urlParams.get('session_id');
-    if (sessionId) {
-      toast.success('Subscription activated successfully!');
-      window.history.replaceState({}, '', '/app');
-      loadUserData();
-    }
-
     const autoScan = urlParams.get('autoScan');
     const demoTextParam = urlParams.get('demoText');
 
@@ -139,30 +41,15 @@ export default function AppPage() {
       if (decodedDemoText.trim()) {
         setInputText(decodedDemoText);
 
-        setTimeout(async () => {
+        setTimeout(() => {
           try {
             const scanResults = scanTextNew(decodedDemoText);
             setResults(scanResults);
-
-            const supabase = createSupabaseClient();
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              try {
-                const { error } = await saveScan(user.id, scanResults);
-                if (error) {
-                  console.error("Error saving scan:", error);
-                } else {
-                  toast.success('Willkommen! Ihr Demo-Text wurde automatisch analysiert und gespeichert.');
-                }
-              } catch (error: any) {
-                console.error("Error saving scan:", error);
-              }
-            } else {
-              toast.success('Willkommen! Ihr Demo-Text wurde automatisch analysiert.');
-            }
+            setScansUsed(prev => prev + 1);
+            toast.success('Demo text was automatically scanned.');
           } catch (error) {
             console.error('Error auto-scanning demo text:', error);
-            toast.error('Fehler beim automatischen Scan. Bitte versuchen Sie es erneut.');
+            toast.error('Error during automatic scan. Please try again.');
           }
         }, 500);
 
@@ -182,11 +69,11 @@ export default function AppPage() {
     >
       <AppHeader
         activeTab="scanner"
-        creditsRemaining={scansRemaining}
+        creditsRemaining={null}
         scansUsed={scansUsed}
-        plan={subscription?.plan || "free"}
-        userName={userName || "User"}
-        userInitials={userInitials || "U"}
+        plan="pro"
+        userName="User"
+        userInitials="U"
       />
 
       {/* Mode Selector */}
