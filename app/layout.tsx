@@ -8,7 +8,7 @@ import { ConditionalHeader } from "@/components/layout/ConditionalHeader";
 import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
-  title: "Green Claim Check - EU Compliance Tool",
+  title: "Green Lens - EU Compliance Tool",
   description: "Validate your marketing claims against EU Green Claims Directive regulations. Prevent greenwashing penalties with our compliance scanner.",
 };
 

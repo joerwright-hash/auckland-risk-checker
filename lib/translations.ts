@@ -252,7 +252,7 @@ export const translations: Record<Language, Translations> = {
       company: "Company",
       legal: "Legal",
       social: "Social",
-      copyright: "© 2026 Green Claim Check. Made in Cologne 🇩🇪",
+      copyright: "© 2026 Green Lens.",
     },
     app: {
       inputText: "Input Text",
@@ -393,7 +393,7 @@ export const translations: Record<Language, Translations> = {
       company: "Unternehmen",
       legal: "Rechtliches",
       social: "Social Media",
-      copyright: "© 2026 Green Claim Check. Hergestellt in Köln 🇩🇪",
+      copyright: "© 2026 Green Lens.",
     },
     app: {
       inputText: "Text eingeben",

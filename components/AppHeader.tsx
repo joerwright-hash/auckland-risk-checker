@@ -217,7 +217,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <Leaf className="w-7 h-7 text-primary" />
             <span className="text-xl font-semibold text-gray-900 dark:text-white">
-              Green Claim Check
+              Green Lens
             </span>
           </Link>
 
