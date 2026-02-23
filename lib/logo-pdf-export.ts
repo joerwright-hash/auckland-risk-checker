@@ -43,7 +43,7 @@ export function exportLogoPDF(results: LogoAnalysisResults): void {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
-  doc.text("Green Claim Check", margin, 25);
+  doc.text("Green Lens", margin, 25);
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");

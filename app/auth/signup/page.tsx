@@ -185,7 +185,7 @@ export default function SignupPage() {
               Create your account
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Get started with Green Claim Check today
+              Get started with Green Lens today
             </p>
           </div>
 

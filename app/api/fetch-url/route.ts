@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     // Fetch the URL
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; GreenClaimCheck/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; GreenLens/1.0)',
       },
       // Set timeout to 30 seconds
       signal: AbortSignal.timeout(30000),

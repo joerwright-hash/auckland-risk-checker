@@ -8,11 +8,10 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { DarkModeToggle } from "@/components/ui/DarkModeToggle";
 import { LanguageToggle } from "@/components/ui/LanguageToggle";
 import { toast } from "sonner";
-import { 
-  Leaf, 
-  Search, 
-  History, 
-  FileText, 
+import {
+  Search,
+  History,
+  FileText,
   Settings,
   User,
   CreditCard,
@@ -20,6 +19,7 @@ import {
   Menu,
   X
 } from "lucide-react";
+import { GreenLensLogo } from "@/components/ui/GreenLensLogo";
 import { formatUsageDisplay, getUsagePercentage, getEncouragingMessage, isUnlimited } from "@/lib/subscription-limits";
 
 interface AppHeaderProps {
@@ -215,10 +215,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         <div className="flex items-center justify-between h-16">
           {/* Logo + Brand (Left) */}
           <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <Leaf className="w-7 h-7 text-primary" />
-            <span className="text-xl font-semibold text-gray-900 dark:text-white">
-              Green Lens
-            </span>
+            <GreenLensLogo className="h-8" />
           </Link>
 
           {/* Navigation Tabs (Center) - Desktop */}

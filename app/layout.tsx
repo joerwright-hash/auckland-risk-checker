@@ -8,8 +8,24 @@ import { ConditionalHeader } from "@/components/layout/ConditionalHeader";
 import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
-  title: "Green Lens - EU Compliance Tool",
-  description: "Validate your marketing claims against EU Green Claims Directive regulations. Prevent greenwashing penalties with our compliance scanner.",
+  title: "Green Lens — EU Green Claims Compliance Screening",
+  description: "Green Lens helps brands and regulators instantly check marketing claims and sustainability labels for compliance with EU green claims rules.",
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
+  openGraph: {
+    title: "Green Lens — EU Green Claims Compliance Screening",
+    description: "Instant compliance screening for marketing copy and sustainability labels under EU Directive 2024/825.",
+    images: ["/og-image.svg"],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Green Lens — EU Green Claims Compliance Screening",
+    description: "Instant compliance screening for marketing copy and sustainability labels under EU Directive 2024/825.",
+    images: ["/og-image.svg"],
+  },
 };
 
 export default function RootLayout({

@@ -136,7 +136,7 @@ export default function PricingPage() {
             Transparente Preise. Maximale EU-Compliance.
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto mb-8">
-            Prüfen Sie Ihre Green Claims automatisch auf Übereinstimmung mit EU-Richtlinien gegen Greenwashing.
+            Compliance-Screening für Marketing-Aussagen und Nachhaltigkeitslabels — gemäß EU-Richtlinie 2024/825.
           </p>
 
           {/* Billing Toggle */}
@@ -391,12 +391,12 @@ export default function PricingPage() {
             Noch Fragen? Wir beraten Sie gerne!
           </h2>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
-            <Link href="mailto:sales@greenclaimcheck.com?subject=Beratungsgespräch">
+            <Link href="mailto:contact@greenlens.eu?subject=Beratungsgespräch">
               <Button variant="primary" size="lg">
                 Beratungsgespräch buchen <ArrowRight className="w-4 h-4 ml-2 inline" />
               </Button>
             </Link>
-            <Link href="mailto:info@greenclaimcheck.com">
+            <Link href="mailto:contact@greenlens.eu">
               <Button variant="outline" size="lg">
                 E-Mail senden
               </Button>

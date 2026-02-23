@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { DarkModeToggle } from "@/components/ui/DarkModeToggle";
 import { LanguageToggle } from "@/components/ui/LanguageToggle";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { Leaf, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
+import { GreenLensLogo } from "@/components/ui/GreenLensLogo";
 
 export function Header() {
   const { t } = useLanguage();
@@ -72,10 +73,7 @@ export function Header() {
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <Leaf className="w-7 h-7 text-primary" />
-            <span className="text-xl font-semibold text-gray-900 dark:text-white">
-              Green Claim Check
-            </span>
+            <GreenLensLogo className="h-8" />
           </Link>
 
           {/* Desktop Navigation */}
