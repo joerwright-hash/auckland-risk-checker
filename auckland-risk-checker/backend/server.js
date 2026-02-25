@@ -10,10 +10,11 @@ const PORT = process.env.PORT || 3001
 app.use(cors())
 app.use(express.json())
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+// Read Claude API key from environment variable
+const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY })
 
 // ─── Geocoding ─────────────────────────────────────────────────────────────
-// Uses OpenStreetMap Nominatim. Restricted to Auckland/NZ viewport for accuracy.
+// Uses OpenStreetMap Nominatim, restricted to NZ with Auckland viewport hint.
 app.get('/api/geocode', async (req, res) => {
   const { address } = req.query
   if (!address) return res.status(400).json({ error: 'address is required' })
@@ -37,7 +38,9 @@ app.get('/api/geocode', async (req, res) => {
     const data = await response.json()
 
     if (!data.length) {
-      return res.status(404).json({ error: 'Address not found. Try a more specific Auckland address.' })
+      return res.status(404).json({
+        error: 'Address not found. Try a more specific Auckland address.',
+      })
     }
 
     const result = data[0]
@@ -54,74 +57,54 @@ app.get('/api/geocode', async (req, res) => {
 
 // ─── Auckland Council ArcGIS Hazard Layers ─────────────────────────────────
 //
-// Auckland Council publishes spatial data via ArcGIS FeatureServer.
-// We query each layer with a point geometry to find intersecting polygons.
+// Each entry is a FeatureServer layer published by Auckland Council.
+// We query with a point geometry (lng, lat) and return any intersecting polygons.
 //
-// Layer catalogue (verified endpoints):
-//   • Natural Hazards - Flood Plain (100-year ARI)
-//   • Natural Hazards - Coastal Inundation
-//   • Natural Hazards - Liquefaction
-//   • Natural Hazards - Overland Flow Path
-//   • Natural Hazards - Storm Surge
-//   • Tsunami Inundation Zone
-//
-// Base URL pattern:
-//   https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/
-//     <ServiceName>/FeatureServer/<LayerIndex>/query
-
 const HAZARD_LAYERS = [
   {
     type: 'Flooding',
     url: 'https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/NaturalHazards/NaturalHazards_FloodHazard/FeatureServer/0/query',
-    keepFields: ['FLOOD_ZONE', 'ARI', 'DESCRIPTION'],
   },
   {
     type: 'Coastal Inundation',
     url: 'https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/NaturalHazards/NaturalHazards_CoastalHazard/FeatureServer/0/query',
-    keepFields: ['ZONE_TYPE', 'DESCRIPTION'],
   },
   {
     type: 'Liquefaction',
     url: 'https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/NaturalHazards/NaturalHazards_LiquefactionHazard/FeatureServer/0/query',
-    keepFields: ['LIQUEFACTION_CATEGORY', 'DESCRIPTION'],
   },
   {
     type: 'Overland Flow',
     url: 'https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/NaturalHazards/NaturalHazards_OverlandFlow/FeatureServer/0/query',
-    keepFields: ['FLOW_DEPTH', 'DESCRIPTION'],
   },
   {
     type: 'Storm Surge',
     url: 'https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/NaturalHazards/NaturalHazards_StormSurge/FeatureServer/0/query',
-    keepFields: ['SURGE_LEVEL', 'DESCRIPTION'],
   },
   {
     type: 'Tsunami',
     url: 'https://gis.aucklandcouncil.govt.nz/arcgis/rest/services/NaturalHazards/NaturalHazards_Tsunami/FeatureServer/0/query',
-    keepFields: ['INUNDATION_DEPTH', 'ZONE', 'DESCRIPTION'],
   },
 ]
 
 /**
  * Query a single ArcGIS FeatureServer layer for a point intersection.
- * Returns null if no features found or if the layer is unavailable.
+ * Returns a normalised hazard object, or null if no intersection / layer unavailable.
  */
 async function queryArcGISLayer(layer, lat, lng) {
   const params = new URLSearchParams({
     geometry: JSON.stringify({ x: lng, y: lat }),
     geometryType: 'esriGeometryPoint',
     spatialRel: 'esriSpatialRelIntersects',
-    inSR: '4326',        // WGS84
+    inSR: '4326',
     outSR: '4326',
     outFields: '*',
     returnGeometry: 'false',
     f: 'json',
   })
 
-  const url = `${layer.url}?${params}`
-
   try {
-    const response = await fetch(url, {
+    const response = await fetch(`${layer.url}?${params}`, {
       signal: AbortSignal.timeout(8000),
       headers: { 'User-Agent': 'AucklandPropertyRiskChecker/1.0' },
     })
@@ -139,15 +122,14 @@ async function queryArcGISLayer(layer, lat, lng) {
     }
 
     if (!data.features || data.features.length === 0) {
-      return null   // No intersection — no hazard here
+      return null // Point does not intersect this hazard zone
     }
 
-    // Take the first intersecting feature; pick only useful fields
+    // Strip ESRI system fields; keep meaningful attributes
     const attrs = data.features[0].attributes || {}
     const filteredAttrs = {}
     for (const [k, v] of Object.entries(attrs)) {
-      if (v === null || v === '') continue
-      // Strip ESRI internal fields but keep any matching keepFields or non-system fields
+      if (v === null || v === '' || v === undefined) continue
       if (k.startsWith('OBJECTID') || k === 'Shape__Area' || k === 'Shape__Length') continue
       filteredAttrs[k] = v
     }
@@ -167,28 +149,37 @@ async function queryArcGISLayer(layer, lat, lng) {
   }
 }
 
-// ─── Claude explanations ───────────────────────────────────────────────────
+// ─── Plain-English explanations via Claude ─────────────────────────────────
 async function generateExplanations(hazards) {
   if (!hazards.length) return []
 
-  const hazardSummaries = hazards.map((h, i) =>
-    `${i + 1}. ${h.type}: ${JSON.stringify(h.attributes)}`
-  ).join('\n')
+  const hazardList = hazards
+    .map((h, i) => `${i + 1}. ${h.type}${
+      Object.keys(h.attributes).length
+        ? ` — council data: ${JSON.stringify(h.attributes)}`
+        : ''
+    }`)
+    .join('\n')
 
-  const prompt = `You are a helpful property advisor. A homeowner in Auckland, New Zealand has asked about hazards on their property.
+  const prompt = `You are a friendly, knowledgeable property advisor helping everyday New Zealanders understand natural hazard risks before buying or living in a home.
 
-The following hazards were found in Auckland Council's GIS data for their property:
+A homeowner has looked up their Auckland property and the following hazards have been identified in Auckland Council's mapping data:
 
-${hazardSummaries}
+${hazardList}
 
-For each hazard, write a clear, plain-English explanation (2–4 sentences) that:
-- Describes what the hazard means in everyday terms
-- Explains the practical implications for the homeowner (insurance, building consent, flood risk, etc.)
-- Is factual but not alarmist
+For EACH hazard listed above, write a short plain-English explanation that:
+- Describes what the hazard actually is in simple, everyday language (no GIS or technical jargon)
+- Explains how it could affect the home or the people living there
+- Mentions practical real-world implications such as insurance costs, building consent requirements, or what could happen during a severe weather event
+- Is calm, clear, and honest — helpful without being scary or alarmist
 
-Respond with a JSON array of strings, one explanation per hazard, in the same order as listed above.
-Example format: ["Explanation for hazard 1.", "Explanation for hazard 2."]
-Only output the JSON array, nothing else.`
+Use this as a guide for the right tone and reading level:
+"This property is in an area that could flood during very heavy rain. While flooding may not happen often, when it does, water could enter the house or damage access to the property. Homes in these areas often face higher insurance costs and may need extra precautions against water damage."
+
+Write 3–4 sentences per hazard. Aim for a general public reading level.
+
+Respond ONLY with a JSON array of strings — one explanation per hazard, in the same order as listed above.
+Example: ["Explanation for hazard 1.", "Explanation for hazard 2."]`
 
   try {
     const message = await anthropic.messages.create({
@@ -202,12 +193,14 @@ Only output the JSON array, nothing else.`
     return Array.isArray(explanations) ? explanations : []
   } catch (err) {
     console.error('Claude API error:', err.message)
-    // Return generic fallbacks so the app still works
-    return hazards.map(h => `This property is located within a ${h.type} hazard zone identified by Auckland Council.`)
+    // Graceful fallback — app still works without AI explanations
+    return hazards.map(
+      h => `This property is located within a ${h.type} hazard zone according to Auckland Council data. Consider speaking with a property professional for more information.`
+    )
   }
 }
 
-// ─── Hazard endpoint ───────────────────────────────────────────────────────
+// ─── /api/hazards ──────────────────────────────────────────────────────────
 app.get('/api/hazards', async (req, res) => {
   const lat = parseFloat(req.query.lat)
   const lng = parseFloat(req.query.lng)
@@ -216,21 +209,18 @@ app.get('/api/hazards', async (req, res) => {
     return res.status(400).json({ error: 'lat and lng are required' })
   }
 
-  // Check Auckland bounds roughly: lat -37.7 to -36.2, lng 174.3 to 175.6
+  // Rough Auckland bounds check
   if (lat < -38 || lat > -35 || lng < 173 || lng > 176) {
     return res.status(400).json({ error: 'Location appears to be outside Auckland' })
   }
 
   try {
-    // Query all hazard layers in parallel
+    // Query all layers in parallel
     const results = await Promise.all(
       HAZARD_LAYERS.map(layer => queryArcGISLayer(layer, lat, lng))
     )
 
-    // Filter out nulls (no intersection or error)
     const hazards = results.filter(Boolean)
-
-    // Generate plain-English explanations via Claude
     const explanations = await generateExplanations(hazards)
 
     return res.json({ hazards, explanations })

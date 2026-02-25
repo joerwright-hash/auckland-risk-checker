@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import 'leaflet/dist/leaflet.css'
-import SearchForm from './components/SearchForm'
-import PropertyMap from './components/PropertyMap'
-import HazardResults from './components/HazardResults'
+import AddressSearch from './components/AddressSearch'
+import MapView from './components/MapView'
+import RiskSummary from './components/RiskSummary'
 import './App.css'
 
 export default function App() {
-  const [location, setLocation] = useState(null)   // { lat, lng, displayName }
+  const [location, setLocation] = useState(null)    // { lat, lng, displayName }
   const [hazardData, setHazardData] = useState(null) // { hazards, explanations }
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [step, setStep] = useState('idle') // idle | geocoding | mapping | checking | done
+  const [step, setStep] = useState('idle') // idle | geocoding | checking | done
 
   async function handleSearch(address) {
     setError(null)
@@ -19,7 +19,7 @@ export default function App() {
     setLoading(true)
 
     try {
-      // Step 1: Geocode
+      // Step 1: Geocode address → lat/lng
       setStep('geocoding')
       const geoRes = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
       if (!geoRes.ok) {
@@ -28,9 +28,9 @@ export default function App() {
       }
       const geo = await geoRes.json()
       setLocation(geo)
-      setStep('checking')
 
-      // Step 2: Check hazards
+      // Step 2: Check hazard layers
+      setStep('checking')
       const hazardRes = await fetch(`/api/hazards?lat=${geo.lat}&lng=${geo.lng}`)
       if (!hazardRes.ok) {
         const err = await hazardRes.json()
@@ -55,12 +55,12 @@ export default function App() {
             <span className="header-icon">🏡</span>
             <span className="header-brand">Auckland Property Risk Checker</span>
           </div>
-          <p className="header-sub">Check council hazard layers for any Auckland property address</p>
+          <p className="header-sub">Check hazard risks for your Auckland property</p>
         </div>
       </header>
 
       <main className="main">
-        <SearchForm onSearch={handleSearch} loading={loading} />
+        <AddressSearch onSearch={handleSearch} loading={loading} />
 
         {error && (
           <div className="alert alert-error">
@@ -87,11 +87,11 @@ export default function App() {
                 Location
               </h2>
               <p className="location-name">{location.displayName}</p>
-              <PropertyMap lat={location.lat} lng={location.lng} />
+              <MapView lat={location.lat} lng={location.lng} />
             </section>
 
             {hazardData && (
-              <HazardResults data={hazardData} />
+              <RiskSummary data={hazardData} />
             )}
           </div>
         )}
@@ -100,13 +100,19 @@ export default function App() {
           <div className="empty-state">
             <div className="empty-icon">🗺️</div>
             <h2>Enter an Auckland address to get started</h2>
-            <p>We'll check the property against Auckland Council hazard data including flooding, coastal inundation, liquefaction, and more.</p>
+            <p>
+              We'll check the property against Auckland Council hazard data including
+              flooding, coastal inundation, liquefaction, and more.
+            </p>
           </div>
         )}
       </main>
 
       <footer className="footer">
-        <p>Data sourced from Auckland Council ArcGIS services. For informational purposes only — not a substitute for professional advice.</p>
+        <p>
+          Data sourced from Auckland Council ArcGIS services.
+          For informational purposes only — not a substitute for professional advice.
+        </p>
       </footer>
     </div>
   )
