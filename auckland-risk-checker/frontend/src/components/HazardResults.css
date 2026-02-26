@@ -142,6 +142,93 @@
   margin: 0 auto;
 }
 
+/* ── Overall Risk Band card ────────────────────────────── */
+.risk-band-card {
+  background: var(--band-bg, #f0fdf4);
+  border: 1.5px solid var(--band-border, #86efac);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.risk-band-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--band-text, #15803d);
+  opacity: 0.8;
+}
+
+.risk-band-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--band-text, #15803d);
+  line-height: 1.2;
+}
+
+.risk-band-context {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* ── Per-hazard score badge ────────────────────────────── */
+.hazard-score {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.hazard-score-num {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--hazard-color, #374151);
+  line-height: 1;
+}
+
+.hazard-score-max {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.hazard-score-delta {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid #fde68a;
+}
+
+/* ── Explanation loading shimmer ───────────────────────── */
+.hazard-explanation--loading {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+
+.explain-shimmer {
+  display: block;
+  width: 100%;
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* ── Disclaimer ────────────────────────────────────────── */
 .hazard-disclaimer {
   font-size: 12px;

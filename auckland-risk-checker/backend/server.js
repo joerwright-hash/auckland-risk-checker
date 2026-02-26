@@ -10,11 +10,9 @@ const PORT = process.env.PORT || 3001
 app.use(cors())
 app.use(express.json())
 
-// Read Claude API key from environment variable
 const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY })
 
 // ─── Geocoding ─────────────────────────────────────────────────────────────
-// Uses OpenStreetMap Nominatim, restricted to NZ with Auckland viewport hint.
 app.get('/api/geocode', async (req, res) => {
   const { address } = req.query
   if (!address) return res.status(400).json({ error: 'address is required' })
@@ -24,31 +22,21 @@ app.get('/api/geocode', async (req, res) => {
     format: 'json',
     limit: '1',
     countrycodes: 'nz',
-    // Auckland bounding box: SW(174.4,-37.1) → NE(175.3,-36.6)
     viewbox: '174.4,-36.6,175.3,-37.1',
     bounded: '0',
   })
 
-  const url = `https://nominatim.openstreetmap.org/search?${params}`
-
   try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'AucklandPropertyRiskChecker/1.0 (portfolio demo)' },
-    })
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params}`,
+      { headers: { 'User-Agent': 'AucklandPropertyRiskChecker/1.0' } },
+    )
     const data = await response.json()
-
     if (!data.length) {
-      return res.status(404).json({
-        error: 'Address not found. Try a more specific Auckland address.',
-      })
+      return res.status(404).json({ error: 'Address not found. Try a more specific Auckland address.' })
     }
-
-    const result = data[0]
-    return res.json({
-      lat: parseFloat(result.lat),
-      lng: parseFloat(result.lon),
-      displayName: result.display_name,
-    })
+    const r = data[0]
+    return res.json({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name })
   } catch (err) {
     console.error('Geocoding error:', err)
     return res.status(500).json({ error: 'Geocoding service unavailable' })
@@ -56,10 +44,7 @@ app.get('/api/geocode', async (req, res) => {
 })
 
 // ─── Auckland Council ArcGIS Hazard Layers ─────────────────────────────────
-//
-// Each entry is a FeatureServer layer published by Auckland Council.
-// We query with a point geometry (lng, lat) and return any intersecting polygons.
-//
+// ArcGIS-only — no Claude call here. Client calls /api/explain separately.
 const HAZARD_LAYERS = [
   {
     type: 'Flooding',
@@ -87,10 +72,6 @@ const HAZARD_LAYERS = [
   },
 ]
 
-/**
- * Query a single ArcGIS FeatureServer layer for a point intersection.
- * Returns a normalised hazard object, or null if no intersection / layer unavailable.
- */
 async function queryArcGISLayer(layer, lat, lng) {
   const params = new URLSearchParams({
     geometry: JSON.stringify({ x: lng, y: lat }),
@@ -108,24 +89,17 @@ async function queryArcGISLayer(layer, lat, lng) {
       signal: AbortSignal.timeout(8000),
       headers: { 'User-Agent': 'AucklandPropertyRiskChecker/1.0' },
     })
-
     if (!response.ok) {
-      console.warn(`Layer "${layer.type}" returned HTTP ${response.status}`)
+      console.warn(`Layer "${layer.type}" HTTP ${response.status}`)
       return null
     }
-
     const data = await response.json()
-
     if (data.error) {
       console.warn(`Layer "${layer.type}" ArcGIS error:`, data.error.message)
       return null
     }
+    if (!data.features || data.features.length === 0) return null
 
-    if (!data.features || data.features.length === 0) {
-      return null // Point does not intersect this hazard zone
-    }
-
-    // Strip ESRI system fields; keep meaningful attributes
     const attrs = data.features[0].attributes || {}
     const filteredAttrs = {}
     for (const [k, v] of Object.entries(attrs)) {
@@ -133,100 +107,126 @@ async function queryArcGISLayer(layer, lat, lng) {
       if (k.startsWith('OBJECTID') || k === 'Shape__Area' || k === 'Shape__Length') continue
       filteredAttrs[k] = v
     }
-
-    return {
-      type: layer.type,
-      source: 'Auckland Council',
-      attributes: filteredAttrs,
-    }
+    return { type: layer.type, source: 'Auckland Council', attributes: filteredAttrs }
   } catch (err) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       console.warn(`Layer "${layer.type}" timed out`)
     } else {
-      console.warn(`Layer "${layer.type}" fetch error:`, err.message)
+      console.warn(`Layer "${layer.type}" error:`, err.message)
     }
     return null
   }
 }
 
-// ─── Plain-English explanations via Claude ─────────────────────────────────
-async function generateExplanations(hazards) {
+// GET /api/hazards — ArcGIS query only, returns raw hazard list
+app.get('/api/hazards', async (req, res) => {
+  const lat = parseFloat(req.query.lat)
+  const lng = parseFloat(req.query.lng)
+  if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'lat and lng are required' })
+  if (lat < -38 || lat > -35 || lng < 173 || lng > 176) {
+    return res.status(400).json({ error: 'Location appears to be outside Auckland' })
+  }
+
+  try {
+    const results = await Promise.all(HAZARD_LAYERS.map(l => queryArcGISLayer(l, lat, lng)))
+    return res.json({ hazards: results.filter(Boolean) })
+  } catch (err) {
+    console.error('Hazard check error:', err)
+    return res.status(500).json({ error: 'Failed to check hazard layers' })
+  }
+})
+
+// ─── Scenario-aware Claude explanations ────────────────────────────────────
+// User-facing labels for each scenario (never expose RCP names)
+const SCENARIO_LABELS = {
+  lower:   'Lower warming future',
+  current: 'Current trajectory',
+  high:    'High warming future',
+}
+
+async function generateExplanations(hazards, scenario = 'current', horizon = 'today') {
   if (!hazards.length) return []
 
+  const scenarioLabel = SCENARIO_LABELS[scenario] || 'Current trajectory'
+  const isFuture = horizon !== 'today'
+
   const hazardList = hazards
-    .map((h, i) => `${i + 1}. ${h.type}${
-      Object.keys(h.attributes).length
+    .map((h, i) => {
+      const attrsStr = Object.keys(h.attributes).length
         ? ` — council data: ${JSON.stringify(h.attributes)}`
         : ''
-    }`)
+      return `${i + 1}. ${h.type}${attrsStr}`
+    })
     .join('\n')
 
-  const prompt = `You are a friendly, knowledgeable property advisor helping everyday New Zealanders understand natural hazard risks before buying or living in a home.
+  // The prompt shifts focus depending on whether we're looking at today or a future horizon.
+  const timeContext = isFuture
+    ? `The homeowner wants to understand risk in ${horizon} under a "${scenarioLabel}" scenario.`
+    : 'The homeowner wants to understand the current risk today.'
 
-A homeowner has looked up their Auckland property and the following hazards have been identified in Auckland Council's mapping data:
+  const instructionFocus = isFuture
+    ? `- Briefly note the current situation today
+- Explain how this hazard is expected to change by ${horizon} under a "${scenarioLabel}" scenario
+- Describe what drives the change in plain terms (e.g. heavier rainfall, higher sea levels) without using scientific jargon
+- Mention what this means practically: damage likelihood, insurance pressure, or resilience considerations`
+    : `- Describe what the hazard is in simple everyday terms
+- Explain how it could affect the home or the people living there
+- Mention practical implications: insurance costs, building requirements, or what happens during a severe weather event`
+
+  const exampleTone = isFuture
+    ? `Example tone: "Today, this property already has some flood risk during heavy rain. In future, heavier downpours are expected to make this kind of flooding more frequent. This increases the chance of water damage and may lead to higher insurance costs or stricter policy terms over time."`
+    : `Example tone: "This property is in an area that could flood during very heavy rain. While flooding may not happen often, when it does, water could enter the house or damage access to the property. Homes in these areas often face higher insurance costs and may need extra precautions against water damage."`
+
+  const prompt = `You are a friendly, knowledgeable property advisor helping everyday New Zealanders understand natural hazard risks.
+
+${timeContext}
+
+The following hazards have been identified at this Auckland property by Auckland Council's mapping data:
 
 ${hazardList}
 
 For EACH hazard listed above, write a short plain-English explanation that:
-- Describes what the hazard actually is in simple, everyday language (no GIS or technical jargon)
-- Explains how it could affect the home or the people living there
-- Mentions practical real-world implications such as insurance costs, building consent requirements, or what could happen during a severe weather event
+${instructionFocus}
 - Is calm, clear, and honest — helpful without being scary or alarmist
+- Uses no GIS or technical climate jargon
 
-Use this as a guide for the right tone and reading level:
-"This property is in an area that could flood during very heavy rain. While flooding may not happen often, when it does, water could enter the house or damage access to the property. Homes in these areas often face higher insurance costs and may need extra precautions against water damage."
+${exampleTone}
 
-Write 3–4 sentences per hazard. Aim for a general public reading level.
+Write 3–5 sentences per hazard. General public reading level.
 
-Respond ONLY with a JSON array of strings — one explanation per hazard, in the same order as listed above.
+Respond ONLY with a JSON array of strings — one explanation per hazard, in the same order as listed.
 Example: ["Explanation for hazard 1.", "Explanation for hazard 2."]`
 
   try {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }],
     })
-
     const text = message.content[0].text.trim()
     const explanations = JSON.parse(text)
     return Array.isArray(explanations) ? explanations : []
   } catch (err) {
     console.error('Claude API error:', err.message)
     // Graceful fallback — app still works without AI explanations
-    return hazards.map(
-      h => `This property is located within a ${h.type} hazard zone according to Auckland Council data. Consider speaking with a property professional for more information.`
+    return hazards.map(h =>
+      `This property is in a ${h.type} hazard zone according to Auckland Council data. Consider speaking with a property professional for more information.`
     )
   }
 }
 
-// ─── /api/hazards ──────────────────────────────────────────────────────────
-app.get('/api/hazards', async (req, res) => {
-  const lat = parseFloat(req.query.lat)
-  const lng = parseFloat(req.query.lng)
-
-  if (isNaN(lat) || isNaN(lng)) {
-    return res.status(400).json({ error: 'lat and lng are required' })
-  }
-
-  // Rough Auckland bounds check
-  if (lat < -38 || lat > -35 || lng < 173 || lng > 176) {
-    return res.status(400).json({ error: 'Location appears to be outside Auckland' })
-  }
+// POST /api/explain — Claude explanations, scenario + horizon aware
+// Body: { hazards: [...], scenario: 'current'|'lower'|'high', horizon: 'today'|'2040'|'2090' }
+app.post('/api/explain', async (req, res) => {
+  const { hazards, scenario, horizon } = req.body
+  if (!Array.isArray(hazards)) return res.status(400).json({ error: 'hazards array required' })
 
   try {
-    // Query all layers in parallel
-    const results = await Promise.all(
-      HAZARD_LAYERS.map(layer => queryArcGISLayer(layer, lat, lng))
-    )
-
-    const hazards = results.filter(Boolean)
-    const explanations = await generateExplanations(hazards)
-
-    return res.json({ hazards, explanations })
+    const explanations = await generateExplanations(hazards, scenario, horizon)
+    return res.json({ explanations })
   } catch (err) {
-    console.error('Hazard check error:', err)
-    return res.status(500).json({ error: 'Failed to check hazard layers' })
+    console.error('Explain error:', err)
+    return res.status(500).json({ error: 'Failed to generate explanations' })
   }
 })
 

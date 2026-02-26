@@ -1,25 +1,77 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import 'leaflet/dist/leaflet.css'
 import AddressSearch from './components/AddressSearch'
 import MapView from './components/MapView'
 import RiskSummary from './components/RiskSummary'
+import ScenarioSelector from './components/ScenarioSelector'
+import { computeScores, SCENARIOS, HORIZONS } from './riskScoring'
 import './App.css'
 
 export default function App() {
-  const [location, setLocation] = useState(null)    // { lat, lng, displayName }
-  const [hazardData, setHazardData] = useState(null) // { hazards, explanations }
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [step, setStep] = useState('idle') // idle | geocoding | checking | done
+  // Address / geocode result
+  const [location, setLocation] = useState(null)        // { lat, lng, displayName }
 
+  // Raw ArcGIS hazard data — fetched once per address search
+  const [hazards, setHazards] = useState(null)          // hazard[]
+
+  // Claude explanations — re-fetched when scenario or horizon changes
+  const [explanations, setExplanations]     = useState(null)
+  const [loadingExplain, setLoadingExplain] = useState(false)
+
+  // Scenario + horizon selectors (default: current trajectory, today)
+  const [scenario, setScenario] = useState('current')
+  const [horizon,  setHorizon]  = useState('today')
+
+  // Main loading + step indicator (only during initial address search)
+  const [loading, setLoading] = useState(false)
+  const [step,    setStep]    = useState('idle')  // idle | geocoding | checking | explaining | done
+  const [error,   setError]   = useState(null)
+
+  // ── Derived: risk scores update instantly from hazards + scenario + horizon ──
+  // No fetch needed — pure computation via riskScoring.js
+  const scores = useMemo(
+    () => hazards ? computeScores(hazards, scenario, horizon) : null,
+    [hazards, scenario, horizon],
+  )
+
+  // ── Helper: display labels for active scenario/horizon ──────────────────
+  const scenarioLabel = SCENARIOS.find(s => s.id === scenario)?.label ?? ''
+  const horizonLabel  = HORIZONS.find(h => h.id === horizon)?.label ?? ''
+
+  // ── Fetch Claude explanations for current hazards + scenario + horizon ───
+  async function fetchExplanations(hazardList, scen, horiz) {
+    if (!hazardList || hazardList.length === 0) {
+      setExplanations([])
+      return
+    }
+    setLoadingExplain(true)
+    try {
+      const res = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hazards: hazardList, scenario: scen, horizon: horiz }),
+      })
+      if (!res.ok) throw new Error('Explanation fetch failed')
+      const data = await res.json()
+      setExplanations(data.explanations)
+    } catch (e) {
+      console.error('Explain error:', e)
+      setExplanations(null)
+    } finally {
+      setLoadingExplain(false)
+    }
+  }
+
+  // ── Full address search: geocode → ArcGIS → Claude ──────────────────────
   async function handleSearch(address) {
     setError(null)
-    setHazardData(null)
+    setHazards(null)
+    setExplanations(null)
     setLocation(null)
     setLoading(true)
 
     try {
-      // Step 1: Geocode address → lat/lng
+      // Step 1: geocode
       setStep('geocoding')
       const geoRes = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
       if (!geoRes.ok) {
@@ -29,15 +81,20 @@ export default function App() {
       const geo = await geoRes.json()
       setLocation(geo)
 
-      // Step 2: Check hazard layers
+      // Step 2: ArcGIS hazard query
       setStep('checking')
-      const hazardRes = await fetch(`/api/hazards?lat=${geo.lat}&lng=${geo.lng}`)
-      if (!hazardRes.ok) {
-        const err = await hazardRes.json()
+      const hazRes = await fetch(`/api/hazards?lat=${geo.lat}&lng=${geo.lng}`)
+      if (!hazRes.ok) {
+        const err = await hazRes.json()
         throw new Error(err.error || 'Hazard check failed')
       }
-      const hazards = await hazardRes.json()
-      setHazardData(hazards)
+      const { hazards: found } = await hazRes.json()
+      setHazards(found)
+
+      // Step 3: Claude explanations (for default scenario + horizon)
+      setStep('explaining')
+      await fetchExplanations(found, scenario, horizon)
+
       setStep('done')
     } catch (e) {
       setError(e.message)
@@ -45,6 +102,17 @@ export default function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // ── Scenario / horizon change: re-fetch explanations only ───────────────
+  function handleScenarioChange(newScenario) {
+    setScenario(newScenario)
+    if (hazards) fetchExplanations(hazards, newScenario, horizon)
+  }
+
+  function handleHorizonChange(newHorizon) {
+    setHorizon(newHorizon)
+    if (hazards) fetchExplanations(hazards, scenario, newHorizon)
   }
 
   return (
@@ -55,7 +123,7 @@ export default function App() {
             <span className="header-icon">🏡</span>
             <span className="header-brand">Auckland Property Risk Checker</span>
           </div>
-          <p className="header-sub">Check hazard risks for your Auckland property</p>
+          <p className="header-sub">Check hazard risks and future climate scenarios for your Auckland property</p>
         </div>
       </header>
 
@@ -73,10 +141,22 @@ export default function App() {
           <div className="status-card">
             <div className="spinner" />
             <span className="status-text">
-              {step === 'geocoding' && 'Locating address…'}
-              {step === 'checking' && 'Checking Auckland Council hazard layers…'}
+              {step === 'geocoding'  && 'Locating address…'}
+              {step === 'checking'   && 'Checking Auckland Council hazard layers…'}
+              {step === 'explaining' && 'Generating plain-English explanations…'}
             </span>
           </div>
+        )}
+
+        {/* Scenario + time selectors — shown once we have results */}
+        {hazards !== null && !loading && (
+          <ScenarioSelector
+            scenario={scenario}
+            horizon={horizon}
+            onScenario={handleScenarioChange}
+            onHorizon={handleHorizonChange}
+            loading={loadingExplain}
+          />
         )}
 
         {location && (
@@ -90,8 +170,15 @@ export default function App() {
               <MapView lat={location.lat} lng={location.lng} />
             </section>
 
-            {hazardData && (
-              <RiskSummary data={hazardData} />
+            {hazards !== null && (
+              <RiskSummary
+                hazards={hazards}
+                explanations={explanations}
+                scores={scores}
+                loadingExplain={loadingExplain}
+                scenarioLabel={scenarioLabel}
+                horizonLabel={horizonLabel}
+              />
             )}
           </div>
         )}
@@ -101,8 +188,8 @@ export default function App() {
             <div className="empty-icon">🗺️</div>
             <h2>Enter an Auckland address to get started</h2>
             <p>
-              We'll check the property against Auckland Council hazard data including
-              flooding, coastal inundation, liquefaction, and more.
+              We'll check the property against Auckland Council hazard data and show how
+              risk levels may change across different climate futures.
             </p>
           </div>
         )}
