@@ -231,9 +231,18 @@ Example: ["Explanation for hazard 1.", "Explanation for hazard 2."]`
       max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }],
     })
-    const text = message.content[0].text.trim()
-    const explanations = JSON.parse(text)
-    return Array.isArray(explanations) ? explanations : []
+const raw = message.content[0].text.trim()
+
+// Remove markdown code fences if Claude wraps the JSON
+const cleaned = raw
+  .replace(/^```json\s*/i, '')
+  .replace(/^```\s*/i, '')
+  .replace(/```$/, '')
+  .trim()
+
+const explanations = JSON.parse(cleaned)
+
+return Array.isArray(explanations) ? explanations : []
   } catch (err) {
     console.error('Claude API error:', err.message)
     // Graceful fallback — app still works without AI explanations
